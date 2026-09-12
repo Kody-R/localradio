@@ -1,0 +1,31 @@
+services:
+  localradio:
+    build: .
+    container_name: localradio
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8095/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    ports:
+      - "8095:8095"
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      MUSIC_DIR: /music
+      DATA_DIR: /data
+      STATION_NAME: LocalRadio
+      STATION_ID: localradio
+      STATION_NUMBER: "801"
+      ARTIST_REPEAT_MINUTES: "90"
+      SONG_REPEAT_HOURS: "12"
+      BITRATE_KBPS: "192"
+      AUTO_SCAN_ON_START: "true"
+      AUTO_START_BROADCAST: "true"
+      SCAN_INTERVAL_HOURS: "24"
+      TZ: America/Chicago
+    volumes:
+      - ./data:/data
+      - /path/to/your/music:/music:ro

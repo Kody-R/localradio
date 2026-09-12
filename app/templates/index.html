@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ station_name }} · LocalRadio</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body data-station-id="{{ station_id }}">
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">LOCALRADIO v0.1.0</div>
+        <h1>{{ station_name }}</h1>
+        <p>Channel {{ station_number }} · self-hosted continuous music radio</p>
+      </div>
+      <div id="statusPill" class="pill offline">Starting…</div>
+    </header>
+
+    <section class="hero card">
+      <div class="now-label">NOW PLAYING</div>
+      <div id="nowTitle" class="track-title">Waiting for music…</div>
+      <div id="nowArtist" class="track-artist">Run a scan if your library is empty.</div>
+      <div id="nowMeta" class="track-meta"></div>
+      <div class="hero-actions">
+        <a class="button primary" href="/playlist.m3u">Open M3U</a>
+        <a class="button" href="/stream/{{ station_id }}.mp3">Listen Live</a>
+        <button class="button" id="scanButton" type="button">Scan Library</button>
+      </div>
+    </section>
+
+    <section class="grid stats">
+      <article class="card metric"><span>Tracks</span><strong id="tracks">0</strong></article>
+      <article class="card metric"><span>Artists</span><strong id="artists">0</strong></article>
+      <article class="card metric"><span>Albums</span><strong id="albums">0</strong></article>
+      <article class="card metric"><span>Listeners</span><strong id="listeners">0</strong></article>
+    </section>
+
+    <section class="grid two">
+      <article class="card">
+        <h2>Station</h2>
+        <dl class="detail-list">
+          <div><dt>Bitrate</dt><dd id="bitrate">—</dd></div>
+          <div><dt>Artist separation</dt><dd id="artistRepeat">—</dd></div>
+          <div><dt>Song separation</dt><dd id="songRepeat">—</dd></div>
+          <div><dt>Last scan</dt><dd id="lastScan">Never</dd></div>
+        </dl>
+      </article>
+
+      <article class="card">
+        <h2>Stream URLs</h2>
+        <div class="url-block">
+          <label>IPTV playlist</label>
+          <code id="m3uUrl"></code>
+        </div>
+        <div class="url-block">
+          <label>Direct MP3 stream</label>
+          <code id="streamUrl"></code>
+        </div>
+      </article>
+    </section>
+
+    <section class="card">
+      <div class="section-title-row">
+        <h2>Recently Played</h2>
+        <span id="scanState" class="muted"></span>
+      </div>
+      <div id="history" class="history empty">No plays recorded yet.</div>
+    </section>
+
+    <section class="card error-card" id="errorCard" hidden>
+      <h2>Playout Notice</h2>
+      <pre id="errorText"></pre>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

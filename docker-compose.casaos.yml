@@ -1,0 +1,77 @@
+name: localradio
+services:
+  localradio:
+    image: ghcr.io/kody-r/localradio:v0.1.0
+    container_name: localradio
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8095/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    ports:
+      - target: 8095
+        published: "8095"
+        protocol: tcp
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      MUSIC_DIR: /music
+      DATA_DIR: /data
+      STATION_NAME: LocalRadio
+      STATION_ID: localradio
+      STATION_NUMBER: "801"
+      ARTIST_REPEAT_MINUTES: "90"
+      SONG_REPEAT_HOURS: "12"
+      BITRATE_KBPS: "192"
+      AUTO_SCAN_ON_START: "true"
+      AUTO_START_BROADCAST: "true"
+      SCAN_INTERVAL_HOURS: "24"
+      TZ: America/Chicago
+    volumes:
+      - type: bind
+        source: /DATA/AppData/localradio/data
+        target: /data
+      - type: bind
+        source: /CHANGE/ME/TO/YOUR/MUSIC
+        target: /music
+        read_only: true
+    x-casaos:
+      envs:
+        - container: STATION_NAME
+          description:
+            en_us: Radio station display name
+        - container: STATION_NUMBER
+          description:
+            en_us: IPTV channel number
+      ports:
+        - container: "8095"
+          description:
+            en_us: LocalRadio web interface and stream
+      volumes:
+        - container: /data
+          description:
+            en_us: Persistent database and application data
+        - container: /music
+          description:
+            en_us: Read-only music library
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  main: localradio
+  author: LocalRadio
+  category: Media
+  description:
+    en_us: Self-hosted continuous music radio over IPTV-style M3U streaming.
+  developer: LocalRadio
+  icon: https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/localradio/main/icon.png
+  index: /
+  port_map: "8095"
+  scheme: http
+  store_app_id: localradio
+  tagline:
+    en_us: Turn your music library into a radio station.
+  title:
+    en_us: LocalRadio
