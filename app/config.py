@@ -21,27 +21,27 @@ def _int(name: str, default: int) -> int:
 class Settings:
     music_dir: Path = Path(os.getenv("MUSIC_DIR", "/music"))
     data_dir: Path = Path(os.getenv("DATA_DIR", "/data"))
-    station_name: str = os.getenv("STATION_NAME", "LocalRadio")
-    station_id: str = os.getenv("STATION_ID", "localradio")
-    station_number: str = os.getenv("STATION_NUMBER", "801")
-    artist_repeat_minutes: int = _int("ARTIST_REPEAT_MINUTES", 90)
-    song_repeat_hours: int = _int("SONG_REPEAT_HOURS", 12)
     bitrate_kbps: int = _int("BITRATE_KBPS", 192)
     sample_rate: int = _int("SAMPLE_RATE", 44100)
     scan_interval_hours: int = _int("SCAN_INTERVAL_HOURS", 24)
     auto_scan_on_start: bool = _bool("AUTO_SCAN_ON_START", True)
     auto_start_broadcast: bool = _bool("AUTO_START_BROADCAST", True)
-    min_year: int = _int("MIN_YEAR", 0)
-    max_year: int = _int("MAX_YEAR", 0)
-    allowed_genres_raw: str = os.getenv("ALLOWED_GENRES", "")
+
+    # v0.1.0 compatibility: these values seed the first station only when the
+    # database contains no stations yet. From v0.1.1 onward station settings
+    # are managed in the web UI and persisted in SQLite.
+    seed_station_name: str = os.getenv("STATION_NAME", "LocalRadio")
+    seed_station_id: str = os.getenv("STATION_ID", "localradio")
+    seed_station_number: str = os.getenv("STATION_NUMBER", "801")
+    seed_artist_repeat_minutes: int = _int("ARTIST_REPEAT_MINUTES", 90)
+    seed_song_repeat_hours: int = _int("SONG_REPEAT_HOURS", 12)
+    seed_min_year: int = _int("MIN_YEAR", 0)
+    seed_max_year: int = _int("MAX_YEAR", 0)
+    seed_allowed_genres: str = os.getenv("ALLOWED_GENRES", "")
 
     @property
     def db_path(self) -> Path:
         return self.data_dir / "localradio.db"
-
-    @property
-    def allowed_genres(self) -> list[str]:
-        return [x.strip().lower() for x in self.allowed_genres_raw.split(",") if x.strip()]
 
 
 settings = Settings()

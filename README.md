@@ -1,193 +1,192 @@
-# LocalRadio v0.1.0
+# LocalRadio v0.1.1
 
-LocalRadio turns a local music library into one continuous self-hosted radio station. It scans common audio formats into SQLite, applies configurable song and artist repeat protection, transcodes tracks in real time with FFmpeg, and exposes an MP3 broadcast plus an IPTV-style M3U playlist.
+LocalRadio turns one local music library into multiple continuous self-hosted radio stations. It scans common audio files into SQLite, lets you build station rules in a web UI, applies station-specific repeat protection, transcodes tracks in real time with FFmpeg, and exposes the enabled stations through one IPTV-style M3U playlist.
 
-This first release deliberately focuses on the radio engine. Multi-station management, TTS DJs, Ollama scripting, broadcast clocks, video/album-art channels and XMLTV are later roadmap items.
+## v0.1.1 features
 
-## v0.1.0 features
-
-- Docker and CasaOS friendly
-- amd64 + arm64 GHCR workflow
-- Read-only `/music` mount
-- Persistent SQLite catalog in `/data`
-- MP3, FLAC, M4A/MP4, OGG, Opus, WAV, AAC, WMA, AIFF and APE discovery
-- Incremental rescans using file size + modification timestamp
-- Automatic removal of catalog entries whose files were deleted
-- One continuous central station shared by all listeners
-- FFmpeg normalization/transcoding to constant-bitrate MP3
-- Artist repeat protection
-- Song repeat protection
-- Optional year and genre filters
-- Persistent play history
-- Automatic startup scan
-- Scheduled library rescans
-- M3U endpoint for IPTV/Jellyfin/VLC clients
-- Direct live MP3 endpoint
-- Responsive status dashboard
-- Health/status APIs
+- Multiple independent stations from one library
+- Web Station Builder: create, edit, delete, enable and disable
+- Per-station channel number and stable stream slug
+- Per-station year range
+- Genre include/exclude filters
+- Artist include/exclude filters
+- Per-station artist/song repeat protection
+- Optional station logo URL / M3U `tvg-logo`
+- Per-station now playing, listeners, errors, eligible-track count and run play count
+- One centralized stream per station shared by all listeners
+- All enabled stations generated in `/playlist.m3u`
+- Persistent station definitions and play history in SQLite
+- Automatic migration from v0.1.0
+- Read-only `/music`; persistent `/data`
+- Incremental music-library rescans
+- Docker, CasaOS and GHCR amd64/arm64 support
 
 ## Architecture
 
 ```text
-/music (read only)
-      |
-      v
-Library Scanner ----> SQLite catalog (/data/localradio.db)
-                           |
-                           v
-                    Station Selector
-                           |
-                 repeat protection
-                           |
-                           v
-                         FFmpeg
-                           |
-                           v
-                     Central Stream Hub
-                      /            \
-                     /              \
-            /playlist.m3u     /stream/localradio.mp3
+                         /music (read only)
+                               |
+                               v
+                        Library Scanner
+                               |
+                               v
+                    SQLite /data/localradio.db
+                               |
+               +---------------+---------------+
+               |               |               |
+               v               v               v
+          Retro 80s       Classic Rock       Chill FM
+          Selector         Selector           Selector
+               |               |               |
+             FFmpeg          FFmpeg          FFmpeg
+               |               |               |
+          Stream Hub       Stream Hub       Stream Hub
+               |               |               |
+     /stream/retro-80s   /stream/classic-rock   ...
+               \               |               /
+                +--------------+--------------+
+                               |
+                         /playlist.m3u
 ```
 
-All connected listeners receive the same live audio. Track selection and play-history recording happen once at the station level, not separately per client.
+Each station selects and records a song once, regardless of how many clients are listening to it.
 
-## Quick start with Docker Compose
+## Quick start
 
-1. Edit `docker-compose.yml`.
-2. Replace `/path/to/your/music` with the host path containing your music.
-3. Start LocalRadio:
+1. Edit `docker-compose.yml` and replace `/path/to/your/music`.
+2. Start the container:
 
 ```bash
 docker compose up -d --build
 ```
 
-4. Open:
+3. Open the Station Builder/dashboard:
 
 ```text
 http://SERVER-IP:8095/
 ```
 
-5. IPTV playlist:
+4. Add the generated IPTV playlist to Jellyfin/VLC/another IPTV client:
 
 ```text
 http://SERVER-IP:8095/playlist.m3u
 ```
 
-6. Direct stream:
+A direct station URL is:
 
 ```text
-http://SERVER-IP:8095/stream/localradio.mp3
+http://SERVER-IP:8095/stream/<station-id>.mp3
 ```
 
-The initial scan may take some time on a very large library. The web dashboard stays available while scanning.
+## Building stations
+
+Choose **New Station** in the dashboard. A station can match the whole library or a filtered subset.
+
+Example Retro 80s station:
+
+```text
+Name: Retro 80s
+ID: retro-80s
+Channel: 801
+Minimum year: 1980
+Maximum year: 1989
+Include genres: Rock, Pop, New Wave
+Exclude genres: Christmas
+Artist separation: 90 minutes
+Song separation: 12 hours
+```
+
+Filters are case-insensitive substring matches. Comma-separated include values are OR rules; excludes remove matches.
+
+## Upgrade from v0.1.0
+
+Use the same `/data` mapping and replace the image with v0.1.1. LocalRadio performs an in-place schema migration.
+
+- Your track catalog remains intact.
+- Existing history remains intact.
+- The old v0.1.0 station becomes the first v0.1.1 station.
+- Legacy history is tagged to that station.
+- Old station environment variables are only used to seed a station when the station table is empty.
+
+After upgrading, use the web Station Builder for station settings.
 
 ## CasaOS / GHCR
 
-The repository includes `docker-compose.casaos.yml` and a GitHub Actions workflow.
-
-Before using the CasaOS compose file, change:
+Edit `docker-compose.casaos.yml`:
 
 ```text
-ghcr.io/YOUR_GITHUB_USERNAME/localradio:v0.1.0
+ghcr.io/YOUR_GITHUB_USERNAME/localradio:v0.1.1
 ```
 
-to your actual GHCR repository, and change:
+and change:
 
 ```text
 /CHANGE/ME/TO/YOUR/MUSIC
 ```
 
-to the host music path.
-
-A typical CasaOS data mapping is already provided:
+The default persistent mapping is:
 
 ```text
 /DATA/AppData/localradio/data -> /data
 ```
 
-The music mount is read-only by design.
+The music mapping remains read-only.
 
 ## Environment variables
 
+Global container settings:
+
 | Variable | Default | Purpose |
 |---|---:|---|
-| `PUID` | `1000` | UID used for the application process and `/data` ownership |
-| `PGID` | `1000` | GID used for the application process and `/data` ownership |
-| `MUSIC_DIR` | `/music` | Container music root |
-| `DATA_DIR` | `/data` | Persistent app-data root |
-| `STATION_NAME` | `LocalRadio` | Display name |
-| `STATION_ID` | `localradio` | Stable ID used in stream/M3U URLs |
-| `STATION_NUMBER` | `801` | IPTV channel number |
-| `ARTIST_REPEAT_MINUTES` | `90` | Preferred same-artist separation |
-| `SONG_REPEAT_HOURS` | `12` | Preferred same-track separation |
-| `BITRATE_KBPS` | `192` | Output MP3 bitrate |
-| `SAMPLE_RATE` | `44100` | Output sample rate |
-| `AUTO_SCAN_ON_START` | `true` | Scan library when the container starts |
-| `AUTO_START_BROADCAST` | `true` | Start playout automatically |
-| `SCAN_INTERVAL_HOURS` | `24` | Rescan interval; `0` disables recurring scans |
-| `MIN_YEAR` | `0` | Minimum year; `0` disables lower bound |
-| `MAX_YEAR` | `0` | Maximum year; `0` disables upper bound |
-| `ALLOWED_GENRES` | empty | Comma-separated case-insensitive genre matches |
-| `TZ` | host choice | Container timezone |
+| `PUID` | `1000` | Runtime UID and `/data` owner |
+| `PGID` | `1000` | Runtime GID |
+| `MUSIC_DIR` | `/music` | Music root inside container |
+| `DATA_DIR` | `/data` | Persistent data root |
+| `BITRATE_KBPS` | `192` | MP3 bitrate used by all stations |
+| `SAMPLE_RATE` | `44100` | MP3 output sample rate |
+| `AUTO_SCAN_ON_START` | `true` | Scan on container startup |
+| `AUTO_START_BROADCAST` | `true` | Start enabled broadcasters |
+| `SCAN_INTERVAL_HOURS` | `24` | Recurring scan period; `0` disables |
+| `TZ` | deployment choice | Container timezone |
 
-Example genre filter:
+Compatibility/first-station seed variables from v0.1.0 are still accepted: `STATION_NAME`, `STATION_ID`, `STATION_NUMBER`, `ARTIST_REPEAT_MINUTES`, `SONG_REPEAT_HOURS`, `MIN_YEAR`, `MAX_YEAR`, and `ALLOWED_GENRES`.
 
-```yaml
-ALLOWED_GENRES: "Rock,Classic Rock,Alternative"
-```
+## API
 
-## Repeat-protection behavior
+- `GET /health` — health, catalog count and station counts
+- `GET /api/status` — network/dashboard state
+- `POST /api/scan` — start a music scan
+- `GET /api/tracks?limit=100` — inspect tracks
+- `GET /api/library/options` — genre/artist suggestions
+- `GET /api/stations` — list station definitions + live status
+- `POST /api/stations` — create station
+- `GET /api/stations/<id>` — station + status + recent history
+- `PUT /api/stations/<id>` — edit station
+- `DELETE /api/stations/<id>` — delete station definition
+- `GET /api/stations/<id>/history` — station-specific history
+- `GET /playlist.m3u` — all enabled stations
+- `GET /stream/<id>.mp3` — live station stream
 
-LocalRadio first tries to select a track satisfying both the artist and song separation windows. On small libraries, if that becomes impossible, it relaxes artist separation while preserving song separation. If the library is too small even for the song window, it falls back to any eligible playable track rather than stopping the station.
+## Resource behavior
 
-## API endpoints
-
-- `GET /health` — lightweight health response
-- `GET /api/status` — station, library, scan, playout and recent-play state
-- `POST /api/scan` — start an asynchronous library rescan
-- `GET /api/tracks?limit=100` — inspect cataloged tracks
-- `GET /playlist.m3u` — IPTV playlist
-- `GET /stream/<station-id>.mp3` — continuous live MP3 stream
-
-## Logs
-
-```bash
-docker logs -f localradio
-```
-
-Useful messages include the library scan summary, current track, FFmpeg errors and tracks marked unplayable.
-
-## Permissions
-
-Find the UID/GID that should own LocalRadio's persistent data if needed:
-
-```bash
-id
-```
-
-Then set `PUID` and `PGID` in Compose. That UID/GID must have read access to the host music path. LocalRadio never writes to `/music`.
+Each enabled station runs one FFmpeg process while broadcasting. CPU use therefore scales primarily with the number of enabled stations, not the number of listeners. Disable stations you are not using on low-power hardware.
 
 ## GitHub Container Registry
 
-Push this source to a GitHub repository. The included workflow builds `linux/amd64` and `linux/arm64` images and publishes them to GHCR on pushes to `main`, version tags, or manual workflow runs.
-
-For a release tag:
+The supplied workflow publishes `linux/amd64` and `linux/arm64` images. For this release:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
-Then use the generated GHCR image in CasaOS.
+## Roadmap
 
-## v0.1.x / v0.2 roadmap
-
-- v0.1.1 — multiple stations + station builder UI
-- v0.1.2 — local TTS DJs + liners/station IDs
-- v0.2.0 — Ollama DJ scripting + advance schedule generation
+- v0.1.2 — local TTS DJs, station IDs and liners
+- v0.2.0 — Ollama DJ scripting + advance scheduling
 - v0.2.1 — weighted A/B/C rotation
 - v0.2.2 — broadcast clocks
 - v0.2.3 — Music Choice-style video presentation
 - v0.2.4 — XMLTV/Jellyfin guide integration
-- v0.2.5 — dayparts and programming blocks
+- v0.2.5 — dayparts/programming
 - v0.3.0 — automatic station/network builder

@@ -16,26 +16,23 @@ def create_app():
     from .config import settings
     from .db import Database
     from .scanner import LibraryScanner
-    from .station import StationSelector
-    from .streaming import StreamHub
+    from .streaming import StationManager
     from .web import create_blueprint
 
     log = logging.getLogger(__name__)
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     app = Flask(__name__)
-    db = Database(settings.db_path)
+    db = Database(settings.db_path, settings=settings)
     scanner = LibraryScanner(db, settings.music_dir)
-    selector = StationSelector(db, settings)
-    hub = StreamHub(db, selector, settings)
+    manager = StationManager(db, settings)
 
     app.extensions["localradio"] = {
         "db": db,
         "scanner": scanner,
-        "selector": selector,
-        "hub": hub,
+        "manager": manager,
         "settings": settings,
     }
-    app.register_blueprint(create_blueprint(db, scanner, hub, settings))
+    app.register_blueprint(create_blueprint(db, scanner, manager, settings))
 
     def startup_worker():
         time.sleep(1)
@@ -44,8 +41,7 @@ def create_app():
                 scanner.scan()
             except Exception:
                 log.exception("Startup music scan failed")
-        if settings.auto_start_broadcast:
-            hub.start()
+        manager.start_all()
 
         if settings.scan_interval_hours > 0:
             while True:
@@ -57,5 +53,5 @@ def create_app():
 
     thread = threading.Thread(target=startup_worker, name="localradio-startup", daemon=True)
     thread.start()
-    atexit.register(hub.stop)
+    atexit.register(manager.stop_all)
     return app

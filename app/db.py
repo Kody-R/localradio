@@ -1,9 +1,9 @@
+import re
 import sqlite3
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
 
 
 SCHEMA = """
@@ -39,6 +39,7 @@ CREATE INDEX IF NOT EXISTS idx_tracks_playable ON tracks(playable);
 CREATE TABLE IF NOT EXISTS play_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     track_id INTEGER NOT NULL,
+    station_id TEXT,
     started_at TEXT NOT NULL,
     completed INTEGER NOT NULL DEFAULT 0,
     client_count INTEGER NOT NULL DEFAULT 0,
@@ -47,6 +48,27 @@ CREATE TABLE IF NOT EXISTS play_history (
 
 CREATE INDEX IF NOT EXISTS idx_history_started ON play_history(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_history_track ON play_history(track_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_history_station ON play_history(station_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS stations (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    channel_number TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    genres_include TEXT NOT NULL DEFAULT '',
+    genres_exclude TEXT NOT NULL DEFAULT '',
+    min_year INTEGER NOT NULL DEFAULT 0,
+    max_year INTEGER NOT NULL DEFAULT 0,
+    artists_include TEXT NOT NULL DEFAULT '',
+    artists_exclude TEXT NOT NULL DEFAULT '',
+    artist_repeat_minutes INTEGER NOT NULL DEFAULT 90,
+    song_repeat_hours INTEGER NOT NULL DEFAULT 12,
+    logo_url TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_stations_enabled ON stations(enabled, channel_number);
 
 CREATE TABLE IF NOT EXISTS system_state (
     key TEXT PRIMARY KEY,
@@ -56,12 +78,26 @@ CREATE TABLE IF NOT EXISTS system_state (
 """
 
 
+STATION_FIELDS = {
+    "name", "channel_number", "enabled", "genres_include", "genres_exclude",
+    "min_year", "max_year", "artists_include", "artists_exclude",
+    "artist_repeat_minutes", "song_repeat_hours", "logo_url",
+}
+
+
+def slugify(value: str) -> str:
+    value = re.sub(r"[^a-z0-9]+", "-", (value or "").strip().lower()).strip("-")
+    return value[:64] or "station"
+
+
 class Database:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, settings=None):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._write_lock = threading.RLock()
         self.init()
+        if settings is not None:
+            self.ensure_seed_station(settings)
 
     def connect(self):
         conn = sqlite3.connect(self.path, timeout=30, check_same_thread=False)
@@ -79,7 +115,64 @@ class Database:
 
     def init(self):
         with self._write_lock, self.connection() as conn:
-            conn.executescript(SCHEMA)
+            # A v0.1.0 DB already has play_history but without station_id. Add
+            # that column before creating its v0.1.1 index.
+            conn.executescript(SCHEMA.split("CREATE INDEX IF NOT EXISTS idx_history_station")[0])
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(play_history)").fetchall()}
+            if "station_id" not in columns:
+                conn.execute("ALTER TABLE play_history ADD COLUMN station_id TEXT")
+            conn.executescript("""
+                CREATE INDEX IF NOT EXISTS idx_history_station ON play_history(station_id, started_at DESC);
+                CREATE TABLE IF NOT EXISTS stations (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    channel_number TEXT NOT NULL DEFAULT '',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    genres_include TEXT NOT NULL DEFAULT '',
+                    genres_exclude TEXT NOT NULL DEFAULT '',
+                    min_year INTEGER NOT NULL DEFAULT 0,
+                    max_year INTEGER NOT NULL DEFAULT 0,
+                    artists_include TEXT NOT NULL DEFAULT '',
+                    artists_exclude TEXT NOT NULL DEFAULT '',
+                    artist_repeat_minutes INTEGER NOT NULL DEFAULT 90,
+                    song_repeat_hours INTEGER NOT NULL DEFAULT 12,
+                    logo_url TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_stations_enabled ON stations(enabled, channel_number);
+                CREATE TABLE IF NOT EXISTS system_state (
+                    key TEXT PRIMARY KEY,
+                    value TEXT,
+                    updated_at TEXT NOT NULL
+                );
+            """)
+            conn.commit()
+
+    def ensure_seed_station(self, settings):
+        with self.connection() as conn:
+            count = conn.execute("SELECT COUNT(*) FROM stations").fetchone()[0]
+        if count:
+            return
+        seed_id = slugify(settings.seed_station_id or settings.seed_station_name)
+        self.create_station({
+            "id": seed_id,
+            "name": settings.seed_station_name,
+            "channel_number": settings.seed_station_number,
+            "enabled": True,
+            "genres_include": settings.seed_allowed_genres,
+            "genres_exclude": "",
+            "min_year": settings.seed_min_year,
+            "max_year": settings.seed_max_year,
+            "artists_include": "",
+            "artists_exclude": "",
+            "artist_repeat_minutes": settings.seed_artist_repeat_minutes,
+            "song_repeat_hours": settings.seed_song_repeat_hours,
+            "logo_url": "",
+        })
+        # Associate legacy v0.1.0 history with the migrated default station.
+        with self._write_lock, self.connection() as conn:
+            conn.execute("UPDATE play_history SET station_id=? WHERE station_id IS NULL OR station_id=''", (seed_id,))
             conn.commit()
 
     def set_state(self, key: str, value: str):
@@ -135,9 +228,7 @@ class Database:
 
     def get_file_signature(self, path: str):
         with self.connection() as conn:
-            row = conn.execute(
-                "SELECT file_size, modified_ns FROM tracks WHERE path=?", (path,)
-            ).fetchone()
+            row = conn.execute("SELECT file_size, modified_ns FROM tracks WHERE path=?", (path,)).fetchone()
             return tuple(row) if row else None
 
     def finish_scan(self) -> int:
@@ -155,11 +246,11 @@ class Database:
             )
             conn.commit()
 
-    def add_play(self, track_id: int, client_count: int) -> int:
+    def add_play(self, track_id: int, client_count: int, station_id: str) -> int:
         with self._write_lock, self.connection() as conn:
             cur = conn.execute(
-                "INSERT INTO play_history(track_id, started_at, client_count) VALUES(?,?,?)",
-                (track_id, datetime.now(timezone.utc).isoformat(), client_count),
+                "INSERT INTO play_history(track_id, station_id, started_at, client_count) VALUES(?,?,?,?)",
+                (track_id, station_id, datetime.now(timezone.utc).isoformat(), client_count),
             )
             conn.commit()
             return cur.lastrowid
@@ -176,22 +267,22 @@ class Database:
     def stats(self) -> dict:
         with self.connection() as conn:
             tracks = conn.execute("SELECT COUNT(*) FROM tracks WHERE playable=1").fetchone()[0]
-            artists = conn.execute(
-                "SELECT COUNT(DISTINCT artist) FROM tracks WHERE playable=1 AND artist IS NOT NULL AND artist<>''"
-            ).fetchone()[0]
-            albums = conn.execute(
-                "SELECT COUNT(DISTINCT album) FROM tracks WHERE playable=1 AND album IS NOT NULL AND album<>''"
-            ).fetchone()[0]
+            artists = conn.execute("SELECT COUNT(DISTINCT artist) FROM tracks WHERE playable=1 AND artist IS NOT NULL AND artist<>''").fetchone()[0]
+            albums = conn.execute("SELECT COUNT(DISTINCT album) FROM tracks WHERE playable=1 AND album IS NOT NULL AND album<>''").fetchone()[0]
             plays = conn.execute("SELECT COUNT(*) FROM play_history").fetchone()[0]
             return {"tracks": tracks, "artists": artists, "albums": albums, "plays": plays}
 
-    def recent_history(self, limit: int = 20) -> list[dict]:
+    def recent_history(self, limit: int = 20, station_id: str | None = None) -> list[dict]:
+        where = "WHERE h.station_id=?" if station_id else ""
+        params = [station_id] if station_id else []
+        params.append(limit)
         with self.connection() as conn:
             rows = conn.execute(
-                """SELECT h.started_at,h.completed,t.title,t.artist,t.album
-                   FROM play_history h JOIN tracks t ON t.id=h.track_id
-                   ORDER BY h.id DESC LIMIT ?""",
-                (limit,),
+                f"""SELECT h.station_id,h.started_at,h.completed,t.title,t.artist,t.album
+                    FROM play_history h JOIN tracks t ON t.id=h.track_id
+                    {where}
+                    ORDER BY h.id DESC LIMIT ?""",
+                params,
             ).fetchall()
             return [dict(row) for row in rows]
 
@@ -202,3 +293,124 @@ class Database:
                 (limit,),
             ).fetchall()
             return [dict(row) for row in rows]
+
+    def list_genres(self) -> list[dict]:
+        with self.connection() as conn:
+            rows = conn.execute("""
+                SELECT genre, COUNT(*) AS count FROM tracks
+                WHERE playable=1 AND genre IS NOT NULL AND TRIM(genre)<>''
+                GROUP BY genre ORDER BY count DESC, genre COLLATE NOCASE
+            """).fetchall()
+            return [dict(row) for row in rows]
+
+    def list_artists(self, limit: int = 500) -> list[dict]:
+        with self.connection() as conn:
+            rows = conn.execute("""
+                SELECT artist, COUNT(*) AS count FROM tracks
+                WHERE playable=1 AND artist IS NOT NULL AND TRIM(artist)<>''
+                GROUP BY artist ORDER BY count DESC, artist COLLATE NOCASE LIMIT ?
+            """, (limit,)).fetchall()
+            return [dict(row) for row in rows]
+
+    @staticmethod
+    def _station_dict(row):
+        if not row:
+            return None
+        d = dict(row)
+        d["enabled"] = bool(d["enabled"])
+        return d
+
+    def list_stations(self, enabled_only: bool = False) -> list[dict]:
+        where = "WHERE enabled=1" if enabled_only else ""
+        with self.connection() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM stations {where} ORDER BY CAST(channel_number AS INTEGER), channel_number, name COLLATE NOCASE"
+            ).fetchall()
+            return [self._station_dict(row) for row in rows]
+
+    def get_station(self, station_id: str) -> dict | None:
+        with self.connection() as conn:
+            row = conn.execute("SELECT * FROM stations WHERE id=?", (station_id,)).fetchone()
+            return self._station_dict(row)
+
+    def _unique_station_id(self, requested: str) -> str:
+        base = slugify(requested)
+        candidate = base
+        n = 2
+        with self.connection() as conn:
+            while conn.execute("SELECT 1 FROM stations WHERE id=?", (candidate,)).fetchone():
+                candidate = f"{base[:58]}-{n}"
+                n += 1
+        return candidate
+
+    @staticmethod
+    def _normalize_station_payload(data: dict, *, existing: dict | None = None) -> dict:
+        src = dict(existing or {})
+        src.update({k: v for k, v in data.items() if k in STATION_FIELDS})
+        name = str(src.get("name") or "New Station").strip()[:120]
+        def intv(key, default, minimum=0, maximum=9999):
+            try:
+                return max(minimum, min(int(src.get(key, default)), maximum))
+            except (TypeError, ValueError):
+                return default
+        return {
+            "name": name,
+            "channel_number": str(src.get("channel_number") or "").strip()[:20],
+            "enabled": 1 if bool(src.get("enabled", True)) else 0,
+            "genres_include": str(src.get("genres_include") or "").strip()[:2000],
+            "genres_exclude": str(src.get("genres_exclude") or "").strip()[:2000],
+            "min_year": intv("min_year", 0),
+            "max_year": intv("max_year", 0),
+            "artists_include": str(src.get("artists_include") or "").strip()[:4000],
+            "artists_exclude": str(src.get("artists_exclude") or "").strip()[:4000],
+            "artist_repeat_minutes": intv("artist_repeat_minutes", 90, 0, 10080),
+            "song_repeat_hours": intv("song_repeat_hours", 12, 0, 8760),
+            "logo_url": str(src.get("logo_url") or "").strip()[:1000],
+        }
+
+    def create_station(self, data: dict) -> dict:
+        normalized = self._normalize_station_payload(data)
+        requested = str(data.get("id") or normalized["name"])
+        station_id = self._unique_station_id(requested)
+        now = datetime.now(timezone.utc).isoformat()
+        with self._write_lock, self.connection() as conn:
+            conn.execute("""
+                INSERT INTO stations(
+                    id,name,channel_number,enabled,genres_include,genres_exclude,min_year,max_year,
+                    artists_include,artists_exclude,artist_repeat_minutes,song_repeat_hours,logo_url,
+                    created_at,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                station_id, normalized["name"], normalized["channel_number"], normalized["enabled"],
+                normalized["genres_include"], normalized["genres_exclude"], normalized["min_year"], normalized["max_year"],
+                normalized["artists_include"], normalized["artists_exclude"], normalized["artist_repeat_minutes"],
+                normalized["song_repeat_hours"], normalized["logo_url"], now, now,
+            ))
+            conn.commit()
+        return self.get_station(station_id)
+
+    def update_station(self, station_id: str, data: dict) -> dict | None:
+        existing = self.get_station(station_id)
+        if not existing:
+            return None
+        normalized = self._normalize_station_payload(data, existing=existing)
+        now = datetime.now(timezone.utc).isoformat()
+        with self._write_lock, self.connection() as conn:
+            conn.execute("""
+                UPDATE stations SET name=?,channel_number=?,enabled=?,genres_include=?,genres_exclude=?,
+                    min_year=?,max_year=?,artists_include=?,artists_exclude=?,artist_repeat_minutes=?,
+                    song_repeat_hours=?,logo_url=?,updated_at=? WHERE id=?
+            """, (
+                normalized["name"], normalized["channel_number"], normalized["enabled"], normalized["genres_include"],
+                normalized["genres_exclude"], normalized["min_year"], normalized["max_year"], normalized["artists_include"],
+                normalized["artists_exclude"], normalized["artist_repeat_minutes"], normalized["song_repeat_hours"],
+                normalized["logo_url"], now, station_id,
+            ))
+            conn.commit()
+        return self.get_station(station_id)
+
+    def delete_station(self, station_id: str) -> bool:
+        with self._write_lock, self.connection() as conn:
+            cur = conn.execute("DELETE FROM stations WHERE id=?", (station_id,))
+            conn.commit()
+            return cur.rowcount > 0

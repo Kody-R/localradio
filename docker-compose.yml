@@ -16,16 +16,18 @@ services:
       PGID: "1000"
       MUSIC_DIR: /music
       DATA_DIR: /data
+      BITRATE_KBPS: "192"
+      SAMPLE_RATE: "44100"
+      AUTO_SCAN_ON_START: "true"
+      AUTO_START_BROADCAST: "true"
+      SCAN_INTERVAL_HOURS: "24"
+      TZ: America/Chicago
+      # First-run seed / v0.1.0 migration defaults only:
       STATION_NAME: LocalRadio
       STATION_ID: localradio
       STATION_NUMBER: "801"
       ARTIST_REPEAT_MINUTES: "90"
       SONG_REPEAT_HOURS: "12"
-      BITRATE_KBPS: "192"
-      AUTO_SCAN_ON_START: "true"
-      AUTO_START_BROADCAST: "true"
-      SCAN_INTERVAL_HOURS: "24"
-      TZ: America/Chicago
     volumes:
       - ./data:/data
       - /path/to/your/music:/music:ro

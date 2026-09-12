@@ -3,76 +3,101 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>{{ station_name }} · LocalRadio</title>
+  <title>LocalRadio</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
-<body data-station-id="{{ station_id }}">
+<body>
   <main class="shell">
     <header class="topbar">
       <div>
-        <div class="eyebrow">LOCALRADIO v0.1.0</div>
-        <h1>{{ station_name }}</h1>
-        <p>Channel {{ station_number }} · self-hosted continuous music radio</p>
+        <div class="eyebrow">LOCALRADIO v0.1.1</div>
+        <h1>Your Radio Network</h1>
+        <p>Build multiple live stations from one read-only music library.</p>
       </div>
-      <div id="statusPill" class="pill offline">Starting…</div>
+      <div class="header-actions">
+        <a class="button" href="/playlist.m3u">Open M3U</a>
+        <button class="button primary" id="newStation" type="button">+ New Station</button>
+      </div>
     </header>
-
-    <section class="hero card">
-      <div class="now-label">NOW PLAYING</div>
-      <div id="nowTitle" class="track-title">Waiting for music…</div>
-      <div id="nowArtist" class="track-artist">Run a scan if your library is empty.</div>
-      <div id="nowMeta" class="track-meta"></div>
-      <div class="hero-actions">
-        <a class="button primary" href="/playlist.m3u">Open M3U</a>
-        <a class="button" href="/stream/{{ station_id }}.mp3">Listen Live</a>
-        <button class="button" id="scanButton" type="button">Scan Library</button>
-      </div>
-    </section>
 
     <section class="grid stats">
       <article class="card metric"><span>Tracks</span><strong id="tracks">0</strong></article>
       <article class="card metric"><span>Artists</span><strong id="artists">0</strong></article>
-      <article class="card metric"><span>Albums</span><strong id="albums">0</strong></article>
+      <article class="card metric"><span>Stations</span><strong id="stationCount">0</strong></article>
       <article class="card metric"><span>Listeners</span><strong id="listeners">0</strong></article>
     </section>
 
-    <section class="grid two">
-      <article class="card">
-        <h2>Station</h2>
-        <dl class="detail-list">
-          <div><dt>Bitrate</dt><dd id="bitrate">—</dd></div>
-          <div><dt>Artist separation</dt><dd id="artistRepeat">—</dd></div>
-          <div><dt>Song separation</dt><dd id="songRepeat">—</dd></div>
-          <div><dt>Last scan</dt><dd id="lastScan">Never</dd></div>
-        </dl>
-      </article>
-
-      <article class="card">
-        <h2>Stream URLs</h2>
-        <div class="url-block">
-          <label>IPTV playlist</label>
-          <code id="m3uUrl"></code>
-        </div>
-        <div class="url-block">
-          <label>Direct MP3 stream</label>
-          <code id="streamUrl"></code>
-        </div>
-      </article>
+    <section class="card library-bar">
+      <div>
+        <strong>Music Library</strong>
+        <span id="scanInfo" class="muted">Checking scan status…</span>
+      </div>
+      <button class="button" id="scanButton" type="button">Scan Library</button>
     </section>
 
-    <section class="card">
-      <div class="section-title-row">
-        <h2>Recently Played</h2>
-        <span id="scanState" class="muted"></span>
+    <section class="section-head">
+      <div>
+        <h2>Stations</h2>
+        <p>Every enabled station broadcasts independently.</p>
       </div>
+      <code id="m3uUrl"></code>
+    </section>
+    <section id="stations" class="station-grid"></section>
+
+    <section class="card recent-card">
+      <div class="section-title-row"><h2>Network Activity</h2><span class="muted">Latest plays across all stations</span></div>
       <div id="history" class="history empty">No plays recorded yet.</div>
     </section>
-
-    <section class="card error-card" id="errorCard" hidden>
-      <h2>Playout Notice</h2>
-      <pre id="errorText"></pre>
-    </section>
   </main>
+
+  <dialog id="stationDialog">
+    <form id="stationForm" method="dialog">
+      <div class="dialog-head">
+        <div><div class="eyebrow">STATION BUILDER</div><h2 id="dialogTitle">New Station</h2></div>
+        <button class="icon-button" id="closeDialog" type="button" aria-label="Close">×</button>
+      </div>
+
+      <input id="editId" type="hidden">
+      <div class="form-grid two-col">
+        <label><span>Station name</span><input id="name" required maxlength="120" placeholder="Retro 80s"></label>
+        <label><span>Station ID / slug</span><input id="stationId" maxlength="64" placeholder="retro-80s"><small>Used in the stream URL. Set when creating the station.</small></label>
+        <label><span>Channel number</span><input id="channelNumber" maxlength="20" placeholder="801"></label>
+        <label class="toggle-row"><span>Enabled</span><input id="enabled" type="checkbox" checked></label>
+      </div>
+
+      <fieldset>
+        <legend>Music Filters</legend>
+        <div class="form-grid two-col">
+          <label><span>Minimum year</span><input id="minYear" type="number" min="0" max="9999" placeholder="0"></label>
+          <label><span>Maximum year</span><input id="maxYear" type="number" min="0" max="9999" placeholder="0"></label>
+          <label class="wide"><span>Include genres</span><input id="genresInclude" list="genreOptions" placeholder="Rock, Classic Rock, Alternative"><small>Comma-separated. Blank allows every genre.</small></label>
+          <label class="wide"><span>Exclude genres</span><input id="genresExclude" list="genreOptions" placeholder="Christmas, Soundtrack"></label>
+          <label class="wide"><span>Include artists</span><input id="artistsInclude" list="artistOptions" placeholder="Optional artist names"></label>
+          <label class="wide"><span>Exclude artists</span><input id="artistsExclude" list="artistOptions" placeholder="Optional artist names"></label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Rotation</legend>
+        <div class="form-grid two-col">
+          <label><span>Artist separation (minutes)</span><input id="artistRepeat" type="number" min="0" max="10080" value="90"></label>
+          <label><span>Song separation (hours)</span><input id="songRepeat" type="number" min="0" max="8760" value="12"></label>
+          <label class="wide"><span>Station logo URL</span><input id="logoUrl" type="url" placeholder="https://…/logo.png"><small>Optional. Included as tvg-logo in the generated M3U.</small></label>
+        </div>
+      </fieldset>
+
+      <div id="formMessage" class="form-message" hidden></div>
+      <div class="dialog-actions">
+        <button class="button danger" id="deleteStation" type="button" hidden>Delete Station</button>
+        <span class="spacer"></span>
+        <button class="button" id="cancelDialog" type="button">Cancel</button>
+        <button class="button primary" type="submit">Save Station</button>
+      </div>
+    </form>
+  </dialog>
+
+  <datalist id="genreOptions"></datalist>
+  <datalist id="artistOptions"></datalist>
   <script src="/static/app.js"></script>
 </body>
 </html>

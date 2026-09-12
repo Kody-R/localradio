@@ -1,7 +1,7 @@
 name: localradio
 services:
   localradio:
-    image: ghcr.io/kody-r/localradio:v0.1.0
+    image: ghcr.io/kody-r/localradio:v0.1.1
     container_name: localradio
     restart: unless-stopped
     healthcheck:
@@ -19,16 +19,17 @@ services:
       PGID: "1000"
       MUSIC_DIR: /music
       DATA_DIR: /data
+      BITRATE_KBPS: "192"
+      SAMPLE_RATE: "44100"
+      AUTO_SCAN_ON_START: "true"
+      AUTO_START_BROADCAST: "true"
+      SCAN_INTERVAL_HOURS: "24"
+      TZ: America/Chicago
       STATION_NAME: LocalRadio
       STATION_ID: localradio
       STATION_NUMBER: "801"
       ARTIST_REPEAT_MINUTES: "90"
       SONG_REPEAT_HOURS: "12"
-      BITRATE_KBPS: "192"
-      AUTO_SCAN_ON_START: "true"
-      AUTO_START_BROADCAST: "true"
-      SCAN_INTERVAL_HOURS: "24"
-      TZ: America/Chicago
     volumes:
       - type: bind
         source: /DATA/AppData/localradio/data
@@ -39,20 +40,20 @@ services:
         read_only: true
     x-casaos:
       envs:
-        - container: STATION_NAME
+        - container: BITRATE_KBPS
           description:
-            en_us: Radio station display name
-        - container: STATION_NUMBER
+            en_us: MP3 output bitrate shared by all stations
+        - container: SCAN_INTERVAL_HOURS
           description:
-            en_us: IPTV channel number
+            en_us: Automatic music-library rescan interval
       ports:
         - container: "8095"
           description:
-            en_us: LocalRadio web interface and stream
+            en_us: LocalRadio web interface and station streams
       volumes:
         - container: /data
           description:
-            en_us: Persistent database and application data
+            en_us: Persistent SQLite database and application data
         - container: /music
           description:
             en_us: Read-only music library
@@ -64,7 +65,7 @@ x-casaos:
   author: LocalRadio
   category: Media
   description:
-    en_us: Self-hosted continuous music radio over IPTV-style M3U streaming.
+    en_us: Build multiple self-hosted music radio stations from one local library and expose them as IPTV-style live streams.
   developer: LocalRadio
   icon: https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/localradio/main/icon.png
   index: /
@@ -72,6 +73,6 @@ x-casaos:
   scheme: http
   store_app_id: localradio
   tagline:
-    en_us: Turn your music library into a radio station.
+    en_us: Turn your music library into a radio network.
   title:
     en_us: LocalRadio
