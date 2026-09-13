@@ -1,5 +1,5 @@
 import threading
-from flask import Blueprint, Response, jsonify, render_template, request, stream_with_context
+from flask import Blueprint, Response, jsonify, render_template, request, send_file, stream_with_context
 
 
 def create_blueprint(db, scanner, manager, settings):
@@ -15,6 +15,7 @@ def create_blueprint(db, scanner, manager, settings):
         running = sum(1 for s in enabled if manager.station_status(s)["running"])
         return jsonify({
             "ok": True,
+            "version": "0.2.0",
             "tracks": db.track_count(),
             "stations_enabled": len(enabled),
             "stations_running": running,
@@ -23,8 +24,9 @@ def create_blueprint(db, scanner, manager, settings):
     @bp.get("/api/status")
     def api_status():
         statuses = manager.statuses()
+        ollama = manager.scheduler.ollama.status()
         return jsonify({
-            "version": "0.1.1",
+            "version": "0.2.0",
             "library": db.stats(),
             "scan": {
                 "running": scanner.running,
@@ -32,6 +34,12 @@ def create_blueprint(db, scanner, manager, settings):
                 "last_result": scanner.last_result,
             },
             "audio": {"bitrate_kbps": settings.bitrate_kbps, "sample_rate": settings.sample_rate},
+            "tts": manager.tts.status(),
+            "ollama": ollama,
+            "schedule": {
+                "minimum_hours": settings.schedule_min_hours,
+                "target_hours": settings.schedule_target_hours,
+            },
             "stations": statuses,
             "recent": db.recent_history(12),
         })
@@ -40,8 +48,41 @@ def create_blueprint(db, scanner, manager, settings):
     def api_scan():
         if scanner.running:
             return jsonify({"ok": False, "message": "Scan already running"}), 409
-        threading.Thread(target=scanner.scan, name="manual-library-scan", daemon=True).start()
+        def run_scan():
+            scanner.scan()
+            for station in db.list_stations(enabled_only=True):
+                manager.scheduler.invalidate_station(station["id"])
+        threading.Thread(target=run_scan, name="manual-library-scan", daemon=True).start()
         return jsonify({"ok": True, "message": "Library scan started"}), 202
+
+    @bp.get("/api/tts")
+    def api_tts():
+        return jsonify(manager.tts.status())
+
+    @bp.post("/api/tts/preview")
+    def api_tts_preview():
+        data = request.get_json(silent=True) or {}
+        text = str(data.get("text") or "You're listening to LocalRadio.")[:500]
+        voice = str(data.get("voice") or "")[:200]
+        try:
+            speed = max(80, min(int(data.get("speed_wpm") or 165), 300))
+        except (TypeError, ValueError):
+            speed = 165
+        audio = manager.tts.generate(text, voice=voice, speed_wpm=speed)
+        if not audio:
+            return jsonify({"error": "No local TTS engine could generate the preview"}), 503
+        return send_file(audio, mimetype="audio/wav", as_attachment=False, download_name="localradio-tts-preview.wav")
+
+    @bp.get("/api/ollama")
+    def api_ollama():
+        return jsonify(manager.scheduler.ollama.status(force=True))
+
+    @bp.post("/api/ollama/test")
+    def api_ollama_test():
+        data = request.get_json(silent=True) or {}
+        model = str(data.get("model") or "").strip()[:200] or None
+        result = manager.scheduler.ollama.test(model=model)
+        return jsonify(result), (200 if result.get("ok") else 503)
 
     @bp.get("/api/tracks")
     def api_tracks():
@@ -64,6 +105,7 @@ def create_blueprint(db, scanner, manager, settings):
         data = request.get_json(silent=True) or {}
         station = db.create_station(data)
         manager.sync()
+        manager.scheduler.ensure_station_async(station["id"])
         return jsonify({"ok": True, "station": station, "playout": manager.station_status(station)}), 201
 
     @bp.get("/api/stations/<station_id>")
@@ -75,6 +117,7 @@ def create_blueprint(db, scanner, manager, settings):
             "station": station,
             "playout": manager.station_status(station),
             "recent": db.recent_history(20, station_id),
+            "upcoming": db.upcoming_schedule(station_id, 20),
         })
 
     @bp.put("/api/stations/<station_id>")
@@ -83,7 +126,8 @@ def create_blueprint(db, scanner, manager, settings):
         station = db.update_station(station_id, data)
         if not station:
             return jsonify({"error": "Unknown station"}), 404
-        manager.sync()
+        manager.sync(rebuild_changed=False)
+        manager.scheduler.invalidate_station(station_id)
         return jsonify({"ok": True, "station": station, "playout": manager.station_status(station)})
 
     @bp.delete("/api/stations/<station_id>")
@@ -91,6 +135,10 @@ def create_blueprint(db, scanner, manager, settings):
         station = db.get_station(station_id)
         if not station:
             return jsonify({"error": "Unknown station"}), 404
+        hub = manager.get_hub(station_id)
+        if hub:
+            hub.stop()
+        db.clear_future_schedule(station_id)
         if not db.delete_station(station_id):
             return jsonify({"error": "Could not delete station"}), 500
         manager.sync()
@@ -101,6 +149,22 @@ def create_blueprint(db, scanner, manager, settings):
         if not db.get_station(station_id):
             return jsonify({"error": "Unknown station"}), 404
         return jsonify(db.recent_history(50, station_id))
+
+    @bp.get("/api/stations/<station_id>/schedule")
+    def station_schedule(station_id):
+        if not db.get_station(station_id):
+            return jsonify({"error": "Unknown station"}), 404
+        return jsonify({
+            "status": manager.scheduler.station_status(station_id),
+            "entries": db.upcoming_schedule(station_id, 100),
+        })
+
+    @bp.post("/api/stations/<station_id>/schedule/rebuild")
+    def rebuild_schedule(station_id):
+        if not db.get_station(station_id):
+            return jsonify({"error": "Unknown station"}), 404
+        manager.scheduler.invalidate_station(station_id)
+        return jsonify({"ok": True, "message": "Schedule rebuild started"}), 202
 
     @bp.get("/playlist.m3u")
     def playlist():

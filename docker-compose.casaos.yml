@@ -1,7 +1,7 @@
 name: localradio
 services:
   localradio:
-    image: ghcr.io/kody-r/localradio:v0.1.1
+    image: ghcr.io/kody-r/localradio:v0.2.0
     container_name: localradio
     restart: unless-stopped
     healthcheck:
@@ -14,17 +14,31 @@ services:
       - target: 8095
         published: "8095"
         protocol: tcp
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       PUID: "1000"
       PGID: "1000"
       MUSIC_DIR: /music
       DATA_DIR: /data
+      CONFIG_DIR: /config
+      TTS_ENGINE: auto
+      DEFAULT_ESPEAK_VOICE: en-us
       BITRATE_KBPS: "192"
       SAMPLE_RATE: "44100"
       AUTO_SCAN_ON_START: "true"
       AUTO_START_BROADCAST: "true"
       SCAN_INTERVAL_HOURS: "24"
       TZ: America/Chicago
+      OLLAMA_URL: http://host.docker.internal:11434
+      OLLAMA_MODEL: qwen3:4b
+      OLLAMA_TIMEOUT_SECONDS: "45"
+      OLLAMA_FAILURE_THRESHOLD: "3"
+      OLLAMA_CIRCUIT_SECONDS: "300"
+      OLLAMA_KEEP_ALIVE: 30m
+      SCHEDULE_MIN_HOURS: "6"
+      SCHEDULE_TARGET_HOURS: "24"
+      SCHEDULE_CHECK_SECONDS: "60"
       STATION_NAME: LocalRadio
       STATION_ID: localradio
       STATION_NUMBER: "801"
@@ -35,17 +49,35 @@ services:
         source: /DATA/AppData/localradio/data
         target: /data
       - type: bind
+        source: /DATA/AppData/localradio/config
+        target: /config
+      - type: bind
         source: /CHANGE/ME/TO/YOUR/MUSIC
         target: /music
         read_only: true
     x-casaos:
       envs:
+        - container: OLLAMA_URL
+          description:
+            en_us: Ollama API URL. Use host.docker.internal for Ollama on the CasaOS host, or a LAN IP for another PC.
+        - container: OLLAMA_MODEL
+          description:
+            en_us: "Default AI DJ model. Recommended for 16 GB systems: qwen3:4b"
+        - container: SCHEDULE_TARGET_HOURS
+          description:
+            en_us: Target amount of programming to prepare ahead of live playout
+        - container: SCHEDULE_MIN_HOURS
+          description:
+            en_us: Minimum healthy advance-schedule buffer
         - container: BITRATE_KBPS
           description:
             en_us: MP3 output bitrate shared by all stations
         - container: SCAN_INTERVAL_HOURS
           description:
             en_us: Automatic music-library rescan interval
+        - container: TTS_ENGINE
+          description:
+            en_us: "Local TTS engine selection: auto, piper, or espeak-ng"
       ports:
         - container: "8095"
           description:
@@ -53,7 +85,10 @@ services:
       volumes:
         - container: /data
           description:
-            en_us: Persistent SQLite database and application data
+            en_us: Persistent SQLite database, advance schedules and TTS cache
+        - container: /config
+          description:
+            en_us: Persistent station imaging and optional Piper voice models
         - container: /music
           description:
             en_us: Read-only music library
@@ -65,14 +100,14 @@ x-casaos:
   author: LocalRadio
   category: Media
   description:
-    en_us: Build multiple self-hosted music radio stations from one local library and expose them as IPTV-style live streams.
+    en_us: Build self-hosted AI music radio stations with advance-scheduled Ollama DJs, local TTS, station imaging, and IPTV live streams.
   developer: LocalRadio
-  icon: https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/localradio/main/icon.png
+  icon: https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS8RJdnspr9tFXsCmW4uVDWDbGCBVaP1zVAuSeV1L2cIw&s=10
   index: /
   port_map: "8095"
   scheme: http
   store_app_id: localradio
   tagline:
-    en_us: Turn your music library into a radio network.
+    en_us: Turn your music library into an AI-powered radio network.
   title:
     en_us: LocalRadio

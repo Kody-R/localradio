@@ -10,9 +10,9 @@
   <main class="shell">
     <header class="topbar">
       <div>
-        <div class="eyebrow">LOCALRADIO v0.1.1</div>
-        <h1>Your Radio Network</h1>
-        <p>Build multiple live stations from one read-only music library.</p>
+        <div class="eyebrow">LOCALRADIO v0.2.0</div>
+        <h1>Your AI Radio Network</h1>
+        <p>Build 24/7 stations from your music library with advance-scheduled Ollama DJs, local TTS and station imaging.</p>
       </div>
       <div class="header-actions">
         <a class="button" href="/playlist.m3u">Open M3U</a>
@@ -25,27 +25,33 @@
       <article class="card metric"><span>Artists</span><strong id="artists">0</strong></article>
       <article class="card metric"><span>Stations</span><strong id="stationCount">0</strong></article>
       <article class="card metric"><span>Listeners</span><strong id="listeners">0</strong></article>
+      <article class="card metric"><span>Local TTS</span><strong class="metric-text" id="ttsStatus">Checking…</strong></article>
+      <article class="card metric"><span>Ollama</span><strong class="metric-text" id="ollamaStatus">Checking…</strong></article>
     </section>
 
     <section class="card library-bar">
       <div>
-        <strong>Music Library</strong>
-        <span id="scanInfo" class="muted">Checking scan status…</span>
+        <strong>AI & Library Services</strong>
+        <span id="scanInfo" class="muted">Checking status…</span>
+        <span id="aiInfo" class="muted service-sub">Default AI model: qwen3:4b</span>
       </div>
-      <button class="button" id="scanButton" type="button">Scan Library</button>
+      <div class="service-actions">
+        <button class="button" id="testOllama" type="button">Test Ollama</button>
+        <button class="button" id="scanButton" type="button">Scan Library</button>
+      </div>
     </section>
 
     <section class="section-head">
       <div>
         <h2>Stations</h2>
-        <p>Every enabled station broadcasts independently.</p>
+        <p>Every enabled station has independent rotation, advance schedule, AI personality, TTS voice and live listeners.</p>
       </div>
       <code id="m3uUrl"></code>
     </section>
     <section id="stations" class="station-grid"></section>
 
     <section class="card recent-card">
-      <div class="section-title-row"><h2>Network Activity</h2><span class="muted">Latest plays across all stations</span></div>
+      <div class="section-title-row"><h2>Network Activity</h2><span class="muted">Latest music plays across all stations</span></div>
       <div id="history" class="history empty">No plays recorded yet.</div>
     </section>
   </main>
@@ -82,7 +88,41 @@
         <div class="form-grid two-col">
           <label><span>Artist separation (minutes)</span><input id="artistRepeat" type="number" min="0" max="10080" value="90"></label>
           <label><span>Song separation (hours)</span><input id="songRepeat" type="number" min="0" max="8760" value="12"></label>
-          <label class="wide"><span>Station logo URL</span><input id="logoUrl" type="url" placeholder="https://…/logo.png"><small>Optional. Included as tvg-logo in the generated M3U.</small></label>
+          <label class="wide"><span>Station logo URL</span><input id="logoUrl" type="url" placeholder="https://…/logo.png"></label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>AI DJ — Ollama</legend>
+        <div class="form-grid two-col">
+          <label class="toggle-row"><span>Enable AI-written DJ breaks</span><input id="aiDjEnabled" type="checkbox" checked></label>
+          <label><span>Ollama model</span><input id="aiModel" list="modelOptions" placeholder="Blank = qwen3:4b"><small>Per-station override. Blank uses OLLAMA_MODEL.</small></label>
+          <label><span>Maximum words per break</span><input id="aiMaxWords" type="number" min="10" max="100" value="40"></label>
+          <div class="preview-box"><span>AI Connection</span><button class="button" id="testStationOllama" type="button">Test Model</button></div>
+          <label class="wide"><span>DJ personality</span><textarea id="aiPersonality" rows="5" maxlength="4000" placeholder="Warm, energetic American FM DJ. Mention artists naturally. Avoid internet slang and exaggerated hype."></textarea><small>LocalRadio separately instructs the model not to invent music facts.</small></label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Local TTS DJ</legend>
+        <div class="form-grid two-col">
+          <label class="toggle-row"><span>Enable DJ breaks</span><input id="djEnabled" type="checkbox" checked></label>
+          <label><span>Voice</span><input id="djVoice" list="voiceOptions" placeholder="Blank = en-us / auto"><small>Piper model name if installed; otherwise an eSpeak NG voice.</small></label>
+          <label><span>Minimum songs between DJ breaks</span><input id="djMinSongs" type="number" min="1" max="50" value="3"></label>
+          <label><span>Maximum songs between DJ breaks</span><input id="djMaxSongs" type="number" min="1" max="50" value="5"></label>
+          <label><span>Voice speed (WPM)</span><input id="djSpeed" type="number" min="80" max="300" value="165"></label>
+          <div class="preview-box"><span>Voice Preview</span><button class="button" id="previewVoice" type="button">Play Preview</button><audio id="previewAudio" controls hidden></audio></div>
+          <label class="wide"><span>Station slogan</span><input id="stationSlogan" maxlength="300" placeholder="The soundtrack of the 1980s"></label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Station Imaging</legend>
+        <div class="form-grid two-col">
+          <label class="toggle-row"><span>Enable station IDs</span><input id="stationIdEnabled" type="checkbox" checked></label>
+          <label><span>Station ID every N songs</span><input id="stationIdEverySongs" type="number" min="1" max="100" value="8"></label>
+          <label class="wide"><span>Generated liners</span><textarea id="stationLiners" rows="5" maxlength="5000" placeholder="You're listening to {station}.&#10;More music, less noise — {station}.&#10;{slogan}. This is {station}."></textarea><small>One liner per line. Use <code>{station}</code> and <code>{slogan}</code> tokens.</small></label>
+          <div class="wide imaging-note"><strong>Custom prerecorded imaging</strong><span id="imagingPath">Save WAV/MP3/OGG files in /config/imaging/STATION-ID/</span><small>Used before generated TTS for station IDs and as an emergency DJ fallback.</small></div>
         </div>
       </fieldset>
 
@@ -91,13 +131,15 @@
         <button class="button danger" id="deleteStation" type="button" hidden>Delete Station</button>
         <span class="spacer"></span>
         <button class="button" id="cancelDialog" type="button">Cancel</button>
-        <button class="button primary" type="submit">Save Station</button>
+        <button class="button primary" type="submit">Save & Rebuild Schedule</button>
       </div>
     </form>
   </dialog>
 
   <datalist id="genreOptions"></datalist>
   <datalist id="artistOptions"></datalist>
+  <datalist id="voiceOptions"></datalist>
+  <datalist id="modelOptions"></datalist>
   <script src="/static/app.js"></script>
 </body>
 </html>

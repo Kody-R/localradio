@@ -64,6 +64,19 @@ CREATE TABLE IF NOT EXISTS stations (
     artist_repeat_minutes INTEGER NOT NULL DEFAULT 90,
     song_repeat_hours INTEGER NOT NULL DEFAULT 12,
     logo_url TEXT NOT NULL DEFAULT '',
+    dj_enabled INTEGER NOT NULL DEFAULT 1,
+    dj_min_songs INTEGER NOT NULL DEFAULT 3,
+    dj_max_songs INTEGER NOT NULL DEFAULT 5,
+    dj_voice TEXT NOT NULL DEFAULT '',
+    dj_speed_wpm INTEGER NOT NULL DEFAULT 165,
+    station_slogan TEXT NOT NULL DEFAULT '',
+    station_liners TEXT NOT NULL DEFAULT '',
+    station_id_enabled INTEGER NOT NULL DEFAULT 1,
+    station_id_every_songs INTEGER NOT NULL DEFAULT 8,
+    ai_dj_enabled INTEGER NOT NULL DEFAULT 1,
+    ai_model TEXT NOT NULL DEFAULT '',
+    ai_personality TEXT NOT NULL DEFAULT '',
+    ai_max_words INTEGER NOT NULL DEFAULT 40,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -82,6 +95,9 @@ STATION_FIELDS = {
     "name", "channel_number", "enabled", "genres_include", "genres_exclude",
     "min_year", "max_year", "artists_include", "artists_exclude",
     "artist_repeat_minutes", "song_repeat_hours", "logo_url",
+    "dj_enabled", "dj_min_songs", "dj_max_songs", "dj_voice", "dj_speed_wpm",
+    "station_slogan", "station_liners", "station_id_enabled", "station_id_every_songs",
+    "ai_dj_enabled", "ai_model", "ai_personality", "ai_max_words",
 }
 
 
@@ -147,6 +163,46 @@ class Database:
                     updated_at TEXT NOT NULL
                 );
             """)
+            # v0.1.2 station imaging / DJ migration. SQLite cannot add several
+            # columns conditionally in one statement, so add only those absent.
+            station_columns = {row[1] for row in conn.execute("PRAGMA table_info(stations)").fetchall()}
+            additions = {
+                "dj_enabled": "INTEGER NOT NULL DEFAULT 1",
+                "dj_min_songs": "INTEGER NOT NULL DEFAULT 3",
+                "dj_max_songs": "INTEGER NOT NULL DEFAULT 5",
+                "dj_voice": "TEXT NOT NULL DEFAULT ''",
+                "dj_speed_wpm": "INTEGER NOT NULL DEFAULT 165",
+                "station_slogan": "TEXT NOT NULL DEFAULT ''",
+                "station_liners": "TEXT NOT NULL DEFAULT ''",
+                "station_id_enabled": "INTEGER NOT NULL DEFAULT 1",
+                "station_id_every_songs": "INTEGER NOT NULL DEFAULT 8",
+                "ai_dj_enabled": "INTEGER NOT NULL DEFAULT 1",
+                "ai_model": "TEXT NOT NULL DEFAULT ''",
+                "ai_personality": "TEXT NOT NULL DEFAULT ''",
+                "ai_max_words": "INTEGER NOT NULL DEFAULT 40",
+            }
+            for column, definition in additions.items():
+                if column not in station_columns:
+                    conn.execute(f"ALTER TABLE stations ADD COLUMN {column} {definition}")
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS schedule_entries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    station_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    track_id INTEGER,
+                    planned_at TEXT NOT NULL,
+                    duration_estimate REAL NOT NULL DEFAULT 0,
+                    script_text TEXT,
+                    audio_path TEXT,
+                    ai_generated INTEGER NOT NULL DEFAULT 0,
+                    state TEXT NOT NULL DEFAULT 'planned',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE SET NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_schedule_station_state ON schedule_entries(station_id, state, id);
+                CREATE INDEX IF NOT EXISTS idx_schedule_station_time ON schedule_entries(station_id, planned_at);
+            """)
             conn.commit()
 
     def ensure_seed_station(self, settings):
@@ -169,6 +225,19 @@ class Database:
             "artist_repeat_minutes": settings.seed_artist_repeat_minutes,
             "song_repeat_hours": settings.seed_song_repeat_hours,
             "logo_url": "",
+            "dj_enabled": True,
+            "dj_min_songs": 3,
+            "dj_max_songs": 5,
+            "dj_voice": "",
+            "dj_speed_wpm": 165,
+            "station_slogan": "",
+            "station_liners": "",
+            "station_id_enabled": True,
+            "station_id_every_songs": 8,
+            "ai_dj_enabled": True,
+            "ai_model": "",
+            "ai_personality": "Friendly, concise local radio DJ. Natural and upbeat without sounding exaggerated.",
+            "ai_max_words": 40,
         })
         # Associate legacy v0.1.0 history with the migrated default station.
         with self._write_lock, self.connection() as conn:
@@ -318,6 +387,9 @@ class Database:
             return None
         d = dict(row)
         d["enabled"] = bool(d["enabled"])
+        d["dj_enabled"] = bool(d.get("dj_enabled", 1))
+        d["station_id_enabled"] = bool(d.get("station_id_enabled", 1))
+        d["ai_dj_enabled"] = bool(d.get("ai_dj_enabled", 1))
         return d
 
     def list_stations(self, enabled_only: bool = False) -> list[dict]:
@@ -366,6 +438,19 @@ class Database:
             "artist_repeat_minutes": intv("artist_repeat_minutes", 90, 0, 10080),
             "song_repeat_hours": intv("song_repeat_hours", 12, 0, 8760),
             "logo_url": str(src.get("logo_url") or "").strip()[:1000],
+            "dj_enabled": 1 if bool(src.get("dj_enabled", True)) else 0,
+            "dj_min_songs": intv("dj_min_songs", 3, 1, 50),
+            "dj_max_songs": intv("dj_max_songs", 5, 1, 50),
+            "dj_voice": str(src.get("dj_voice") or "").strip()[:200],
+            "dj_speed_wpm": intv("dj_speed_wpm", 165, 80, 300),
+            "station_slogan": str(src.get("station_slogan") or "").strip()[:300],
+            "station_liners": str(src.get("station_liners") or "").strip()[:5000],
+            "station_id_enabled": 1 if bool(src.get("station_id_enabled", True)) else 0,
+            "station_id_every_songs": intv("station_id_every_songs", 8, 1, 100),
+            "ai_dj_enabled": 1 if bool(src.get("ai_dj_enabled", True)) else 0,
+            "ai_model": str(src.get("ai_model") or "").strip()[:200],
+            "ai_personality": str(src.get("ai_personality") or "").strip()[:4000],
+            "ai_max_words": intv("ai_max_words", 40, 10, 100),
         }
 
     def create_station(self, data: dict) -> dict:
@@ -378,13 +463,18 @@ class Database:
                 INSERT INTO stations(
                     id,name,channel_number,enabled,genres_include,genres_exclude,min_year,max_year,
                     artists_include,artists_exclude,artist_repeat_minutes,song_repeat_hours,logo_url,
-                    created_at,updated_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    dj_enabled,dj_min_songs,dj_max_songs,dj_voice,dj_speed_wpm,station_slogan,station_liners,
+                    station_id_enabled,station_id_every_songs,ai_dj_enabled,ai_model,ai_personality,ai_max_words,created_at,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 station_id, normalized["name"], normalized["channel_number"], normalized["enabled"],
                 normalized["genres_include"], normalized["genres_exclude"], normalized["min_year"], normalized["max_year"],
                 normalized["artists_include"], normalized["artists_exclude"], normalized["artist_repeat_minutes"],
-                normalized["song_repeat_hours"], normalized["logo_url"], now, now,
+                normalized["song_repeat_hours"], normalized["logo_url"], normalized["dj_enabled"],
+                normalized["dj_min_songs"], normalized["dj_max_songs"], normalized["dj_voice"],
+                normalized["dj_speed_wpm"], normalized["station_slogan"], normalized["station_liners"],
+                normalized["station_id_enabled"], normalized["station_id_every_songs"], normalized["ai_dj_enabled"],
+                normalized["ai_model"], normalized["ai_personality"], normalized["ai_max_words"], now, now,
             ))
             conn.commit()
         return self.get_station(station_id)
@@ -399,12 +489,18 @@ class Database:
             conn.execute("""
                 UPDATE stations SET name=?,channel_number=?,enabled=?,genres_include=?,genres_exclude=?,
                     min_year=?,max_year=?,artists_include=?,artists_exclude=?,artist_repeat_minutes=?,
-                    song_repeat_hours=?,logo_url=?,updated_at=? WHERE id=?
+                    song_repeat_hours=?,logo_url=?,dj_enabled=?,dj_min_songs=?,dj_max_songs=?,dj_voice=?,
+                    dj_speed_wpm=?,station_slogan=?,station_liners=?,station_id_enabled=?,station_id_every_songs=?,
+                    ai_dj_enabled=?,ai_model=?,ai_personality=?,ai_max_words=?,updated_at=? WHERE id=?
             """, (
                 normalized["name"], normalized["channel_number"], normalized["enabled"], normalized["genres_include"],
                 normalized["genres_exclude"], normalized["min_year"], normalized["max_year"], normalized["artists_include"],
                 normalized["artists_exclude"], normalized["artist_repeat_minutes"], normalized["song_repeat_hours"],
-                normalized["logo_url"], now, station_id,
+                normalized["logo_url"], normalized["dj_enabled"], normalized["dj_min_songs"],
+                normalized["dj_max_songs"], normalized["dj_voice"], normalized["dj_speed_wpm"],
+                normalized["station_slogan"], normalized["station_liners"], normalized["station_id_enabled"],
+                normalized["station_id_every_songs"], normalized["ai_dj_enabled"], normalized["ai_model"],
+                normalized["ai_personality"], normalized["ai_max_words"], now, station_id,
             ))
             conn.commit()
         return self.get_station(station_id)
@@ -414,3 +510,94 @@ class Database:
             cur = conn.execute("DELETE FROM stations WHERE id=?", (station_id,))
             conn.commit()
             return cur.rowcount > 0
+
+
+    def clear_future_schedule(self, station_id: str):
+        with self._write_lock, self.connection() as conn:
+            conn.execute("DELETE FROM schedule_entries WHERE station_id=? AND state IN ('planned','playing')", (station_id,))
+            conn.commit()
+
+    def cleanup_schedule(self, keep_completed: int = 200):
+        with self._write_lock, self.connection() as conn:
+            stations = [r[0] for r in conn.execute("SELECT id FROM stations").fetchall()]
+            for sid in stations:
+                rows = conn.execute(
+                    "SELECT id FROM schedule_entries WHERE station_id=? AND state IN ('completed','skipped') ORDER BY id DESC LIMIT -1 OFFSET ?",
+                    (sid, max(0, int(keep_completed))),
+                ).fetchall()
+                if rows:
+                    conn.executemany("DELETE FROM schedule_entries WHERE id=?", [(r[0],) for r in rows])
+            conn.commit()
+
+    def add_schedule_entry(self, station_id: str, kind: str, planned_at: str, duration_estimate: float, *, track_id=None, script_text=None, audio_path=None, ai_generated=False):
+        now = datetime.now(timezone.utc).isoformat()
+        with self._write_lock, self.connection() as conn:
+            cur = conn.execute(
+                """INSERT INTO schedule_entries(station_id,kind,track_id,planned_at,duration_estimate,script_text,audio_path,ai_generated,state,created_at,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?, 'planned', ?, ?)""",
+                (station_id, kind, track_id, planned_at, float(duration_estimate or 0), script_text, str(audio_path) if audio_path else None, 1 if ai_generated else 0, now, now),
+            )
+            conn.commit()
+            return cur.lastrowid
+
+    def next_schedule_entry(self, station_id: str):
+        with self.connection() as conn:
+            row = conn.execute(
+                """SELECT s.*,t.path,t.title,t.artist,t.album,t.genre,t.year,t.duration
+                   FROM schedule_entries s LEFT JOIN tracks t ON t.id=s.track_id
+                   WHERE s.station_id=? AND s.state='planned' ORDER BY s.id LIMIT 1""",
+                (station_id,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def set_schedule_state(self, entry_id: int, state: str):
+        now = datetime.now(timezone.utc).isoformat()
+        with self._write_lock, self.connection() as conn:
+            conn.execute("UPDATE schedule_entries SET state=?,updated_at=? WHERE id=?", (state, now, int(entry_id)))
+            conn.commit()
+
+    def schedule_buffer(self, station_id: str):
+        with self.connection() as conn:
+            row = conn.execute(
+                """SELECT COUNT(*) AS entries,
+                          COALESCE(SUM(duration_estimate),0) AS seconds,
+                          MAX(planned_at) AS prepared_through,
+                          SUM(CASE WHEN kind='music' THEN 1 ELSE 0 END) AS music_entries,
+                          SUM(CASE WHEN kind='dj' THEN 1 ELSE 0 END) AS dj_entries
+                   FROM schedule_entries WHERE station_id=? AND state='planned'""",
+                (station_id,),
+            ).fetchone()
+            d = dict(row)
+            d["hours"] = round(float(d.get("seconds") or 0) / 3600.0, 2)
+            return d
+
+    def recent_schedule_scripts(self, station_id: str, limit: int = 6):
+        with self.connection() as conn:
+            rows = conn.execute(
+                """SELECT script_text FROM schedule_entries
+                   WHERE station_id=? AND script_text IS NOT NULL AND TRIM(script_text)<>''
+                   ORDER BY id DESC LIMIT ?""",
+                (station_id, max(1, min(int(limit), 20))),
+            ).fetchall()
+            return [r[0] for r in rows]
+
+    def scheduled_track_ids(self, station_id: str, limit: int = 250):
+        with self.connection() as conn:
+            rows = conn.execute(
+                """SELECT track_id FROM schedule_entries
+                   WHERE station_id=? AND state='planned' AND kind='music' AND track_id IS NOT NULL
+                   ORDER BY id DESC LIMIT ?""",
+                (station_id, max(1, min(int(limit), 1000))),
+            ).fetchall()
+            return [r[0] for r in rows]
+
+    def upcoming_schedule(self, station_id: str, limit: int = 20):
+        with self.connection() as conn:
+            rows = conn.execute(
+                """SELECT s.id,s.kind,s.planned_at,s.duration_estimate,s.script_text,s.ai_generated,s.state,
+                          t.title,t.artist,t.album,t.year
+                   FROM schedule_entries s LEFT JOIN tracks t ON t.id=s.track_id
+                   WHERE s.station_id=? AND s.state='planned' ORDER BY s.id LIMIT ?""",
+                (station_id, max(1, min(int(limit), 100))),
+            ).fetchall()
+            return [dict(r) for r in rows]

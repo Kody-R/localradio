@@ -11,17 +11,35 @@ services:
       start_period: 30s
     ports:
       - "8095:8095"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       PUID: "1000"
       PGID: "1000"
       MUSIC_DIR: /music
       DATA_DIR: /data
+      CONFIG_DIR: /config
+      TTS_ENGINE: auto
+      DEFAULT_ESPEAK_VOICE: en-us
       BITRATE_KBPS: "192"
       SAMPLE_RATE: "44100"
       AUTO_SCAN_ON_START: "true"
       AUTO_START_BROADCAST: "true"
       SCAN_INTERVAL_HOURS: "24"
       TZ: America/Chicago
+
+      # v0.2.0 AI DJ / advance scheduler.
+      # If Ollama runs on another PC, replace host.docker.internal with that PC's LAN IP.
+      OLLAMA_URL: http://host.docker.internal:11434
+      OLLAMA_MODEL: qwen3:4b
+      OLLAMA_TIMEOUT_SECONDS: "45"
+      OLLAMA_FAILURE_THRESHOLD: "3"
+      OLLAMA_CIRCUIT_SECONDS: "300"
+      OLLAMA_KEEP_ALIVE: 30m
+      SCHEDULE_MIN_HOURS: "6"
+      SCHEDULE_TARGET_HOURS: "24"
+      SCHEDULE_CHECK_SECONDS: "60"
+
       # First-run seed / v0.1.0 migration defaults only:
       STATION_NAME: LocalRadio
       STATION_ID: localradio
@@ -30,4 +48,5 @@ services:
       SONG_REPEAT_HOURS: "12"
     volumes:
       - ./data:/data
+      - ./config:/config
       - /path/to/your/music:/music:ro

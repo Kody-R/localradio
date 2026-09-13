@@ -48,6 +48,8 @@ def create_app():
                 time.sleep(settings.scan_interval_hours * 3600)
                 try:
                     scanner.scan()
+                    for station in db.list_stations(enabled_only=True):
+                        manager.scheduler.invalidate_station(station["id"])
                 except Exception:
                     log.exception("Scheduled music scan failed")
 

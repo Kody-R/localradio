@@ -11,7 +11,7 @@ class StationSelector:
         self.db = db
         self.station = station
 
-    def _base_where(self):
+    def _base_where(self, exclude_ids=None):
         s = self.station
         clauses = ["t.playable=1"]
         params = []
@@ -45,6 +45,11 @@ class StationSelector:
         for artist in _csv(s.get("artists_exclude", "")):
             clauses.append("LOWER(COALESCE(t.artist,'')) NOT LIKE ?")
             params.append(f"%{artist}%")
+
+        ids = [int(x) for x in (exclude_ids or []) if x is not None]
+        if ids:
+            clauses.append("t.id NOT IN (" + ",".join("?" for _ in ids) + ")")
+            params.extend(ids)
         return clauses, params
 
     def eligible_track_count(self) -> int:
@@ -54,12 +59,12 @@ class StationSelector:
                 f"SELECT COUNT(*) FROM tracks t WHERE {' AND '.join(clauses)}", params
             ).fetchone()[0]
 
-    def choose_next(self):
+    def choose_next(self, exclude_ids=None):
         s = self.station
         now = datetime.now(timezone.utc)
         song_cutoff = (now - timedelta(hours=int(s.get("song_repeat_hours") or 0))).isoformat()
         artist_cutoff = (now - timedelta(minutes=int(s.get("artist_repeat_minutes") or 0))).isoformat()
-        clauses, params = self._base_where()
+        clauses, params = self._base_where(exclude_ids=exclude_ids)
         sid = s["id"]
 
         strict_sql = f"""
